@@ -1,58 +1,70 @@
 # battle/ai.py
+# -*- coding: utf-8 -*-
+
+"""
+IA simple pour le choix de l'action ennemie.
+Stratégie :
+ - si PV bas et objet de soin dispo → soigner (skill >= 2)
+ - sinon choisir l'attaque la plus prometteuse (power * efficacité * STAB)
+ - sinon aléatoire de secours
+"""
 
 import random
+from typing import Dict, List
 from battle.engine import calculate_damage
 
 class BattleAI:
     """
-    Intelligence artificielle de combat pour choisir les attaques selon un niveau de compétence.
-    
-    Attributes:
-        skill_level (int): Niveau de compétence de l'IA, influence la prise en compte des effets de statut.
+    Intelligence artificielle de combat basique.
+    skill_level:
+      0 = random safe
+      1 = préfère power/efficacité
+      2 = gère soin simple si PV bas
     """
-    def __init__(self, skill_level=0):
+    def __init__(self, skill_level: int = 1, rng: random.Random = None):
+        self.skill_level = int(skill_level)
+        self.rng = rng or random.Random()
+
+    def choose_action(self, enemy: Dict, target: Dict) -> Dict:
         """
-        Initialise une instance de l'IA avec un niveau de compétence donné.
-
-        Args:
-            skill_level (int): Niveau de compétence de l'IA (par défaut : 0).
+        Choisit une action :
+          return {"type": "move", "index": i} ou {"type": "item", "item": "Potion"}
         """
-        self.skill_level = skill_level
+        moves: List[Dict] = enemy.get("moves", [])
+        hp = int(enemy.get("hp", 1))
+        max_hp = int(enemy.get("stats", {}).get("hp", hp))
 
-    def choose_move(self, attacker, defender, moves):
-        """
-        Choisit la meilleure attaque à utiliser parmi celles disponibles.
+        # Soins si HP < 30% et skill >= 2
+        if self.skill_level >= 2 and hp < 0.3 * max_hp:
+            bag = enemy.get("bag", [])
+            for it in bag:
+                if it.get("name") in ("Potion", "Super Potion", "Hyper Potion") and it.get("quantity", 0) > 0:
+                    return {"type": "item", "item": it["name"]}
 
-        Args:
-            attacker (dict): Dictionnaire représentant le Pokémon attaquant.
-            defender (dict): Dictionnaire représentant le Pokémon défenseur.
-            moves (list): Liste des attaques disponibles (chaque attaque est un dictionnaire).
+        # Choix de move
+        if not moves:
+            return {"type": "skip"}
 
-        Returns:
-            dict: L'attaque choisie.
-        """
-        best_score = float("-inf")
-        best_move = None
-
-        for move in moves:
-            power = move.get("power")
-            if not power:
+        scored = []
+        for i, mv in enumerate(moves):
+            power = int(mv.get("power", 0) or 0)
+            if power <= 0 and self.skill_level >= 1:
+                # évite les status-only si d'autres choix existent
                 continue
+            calc = calculate_damage(enemy, target, mv, self.rng)
+            score = calc["damage"]
+            # bonus efficacité/STAB
+            score *= (1.25 if calc["eff"] > 1.0 else 1.0)
+            score *= (1.15 if calc["eff"] >= 2.0 else 1.0)
+            score *= (1.10 if calc["eff"] == 0.5 else 1.0)  # léger ajustement
+            score *= (1.10 if calc["stab"] > 1.0 else 1.0)
+            scored.append((score, i))
 
-            damage, _, type_multiplier = calculate_damage(attacker, defender, move)
+        if not scored:
+            # tous status-only ou indisponibles → random
+            idx = self.rng.randrange(len(moves))
+            return {"type": "move", "index": idx}
 
-            score = damage * (move.get("accuracy", 100) / 100)
-
-            if type_multiplier > 1:
-                score *= 1.5
-            elif type_multiplier < 1:
-                score *= 0.5
-
-            if move.get("effects", {}).get("status") and self.skill_level >= 32:
-                score += 10
-
-            if score > best_score:
-                best_score = score
-                best_move = move
-
-        return best_move if best_move else random.choice(moves)
+        scored.sort(reverse=True)
+        best_idx = scored[0][1]
+        return {"type": "move", "index": best_idx}

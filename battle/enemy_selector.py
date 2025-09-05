@@ -1,43 +1,36 @@
 # battle/enemy_selector.py
+# -*- coding: utf-8 -*-
 
+"""
+Sélection d'un ennemi équilibré en fonction du niveau de l'équipe du joueur.
+Pas d'accès disque ici : on suppose que la liste des candidats est déjà fournie
+ou que la scène appelle une autre couche pour charger.
+"""
+
+from typing import List, Dict
 import random
-from data.pokemon_loader import get_all_pokemon
 
-def get_balanced_enemy(ally_pokemon, level_margin=1, stat_margin=0.15):
+def pick_enemy(candidates: List[Dict], target_level: int, rng: random.Random = None) -> Dict:
     """
-    Sélectionne un Pokémon ennemi équilibré en fonction d'un Pokémon allié donné.
-
-    Args:
-        ally_pokemon (dict): Le Pokémon de l'utilisateur (doit contenir "level" et "base_stats").
-        level_margin (int, optional): Marge de niveau autorisée autour de celui de l'allié.
-        stat_margin (float, optional): Marge de tolérance sur le total des statistiques de base.
-
-    Returns:
-        dict: Un Pokémon adverse équilibré avec un niveau assigné.
+    candidates: liste de Pokémon dict avec au moins {"name", "level", "stats": {"hp":..}}
+    target_level: niveau moyen désiré
+    Stratégie : minimiser |level - target_level|, tie-break aléatoire.
     """
-    all_pokemon = get_all_pokemon()
+    if rng is None:
+        rng = random.Random()
 
-    ally_level = ally_pokemon.get("level", 5)
-    ally_base_stats = ally_pokemon.get("base_stats", {})
-    ally_total_stats = sum(ally_base_stats.values())
+    if not candidates:
+        return {}
 
-    level_range = range(max(1, ally_level - level_margin), ally_level + level_margin + 1)
-    stat_min = int(ally_total_stats * (1.0 - stat_margin))
-    stat_max = int(ally_total_stats * (1.0 + stat_margin))
+    best = []
+    best_diff = 999
+    for p in candidates:
+        lvl = int(p.get("level", 1))
+        diff = abs(lvl - int(target_level or 1))
+        if diff < best_diff:
+            best = [p]
+            best_diff = diff
+        elif diff == best_diff:
+            best.append(p)
 
-    filtered = []
-    for pkm in all_pokemon:
-        base_stats = pkm.get("stats", {})
-        total_stats = sum(base_stats.values())
-
-        # On exclut les Pokémon qui n'ont pas d'évolution (stade final)
-        if not pkm.get("evolution", {}).get("evolves_to"):
-            continue
-
-        if stat_min <= total_stats <= stat_max:
-            filtered.append({
-                **pkm,
-                "level": random.choice(level_range)
-            })
-
-    return random.choice(filtered) if filtered else random.choice(all_pokemon)
+    return rng.choice(best)

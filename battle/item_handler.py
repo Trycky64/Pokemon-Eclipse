@@ -1,103 +1,57 @@
 # battle/item_handler.py
+# -*- coding: utf-8 -*-
 
-from data.items_loader import get_item_data
-from battle.capture_handler import attempt_capture
+"""
+Gestion des objets (hors ball de capture qui relève de capture_handler).
+Implémente : Potion, Super Potion, Hyper Potion, Antidote, Anti-Brûle, Antiparalysie, Réveil, Antigel.
+"""
 
-# Objets interdits pendant un combat
-NON_BATTLE_ITEMS = [
-    "Rappel Max", "Rappel", "Repousse", "Super Bonbon"
-]
+from typing import Dict
 
-def can_use_item_in_battle(item_name):
+HEALS = {
+    "Potion": 20,
+    "Super Potion": 50,
+    "Hyper Potion": 200,
+}
+
+CURES = {
+    "Antidote": "poison",
+    "Anti-Brûle": "burn",
+    "Antiparalysie": "paralysis",
+    "Réveil": "sleep",
+    "Antigel": "freeze",
+}
+
+def heal_pokemon(pokemon: Dict, amount: int) -> int:
+    """Soigne et retourne les PV réellement rendus."""
+    max_hp = int(pokemon.get("stats", {}).get("hp", pokemon.get("max_hp", 1)))
+    cur_hp = int(pokemon.get("hp", max_hp))
+    new_hp = min(max_hp, cur_hp + int(amount))
+    delta = new_hp - cur_hp
+    pokemon["hp"] = new_hp
+    return delta
+
+def cure_status(pokemon: Dict, status: str) -> bool:
+    if pokemon.get("status", "none") == status:
+        pokemon["status"] = "none"
+        return True
+    return False
+
+def use_item_on_pokemon(item_name: str, pokemon: Dict) -> Dict:
     """
-    Vérifie si un objet peut être utilisé en combat.
-
-    Args:
-        item_name (str): Nom de l’objet.
-
-    Returns:
-        bool: True si l’objet est utilisable en combat, sinon False.
+    Utilise un objet (hors ball) sur un Pokémon.
+    Retour: { "success": bool, "messages": [str] }
     """
-    item = get_item_data(item_name)
-    return item is not None and item_name not in NON_BATTLE_ITEMS
+    if item_name in HEALS:
+        healed = heal_pokemon(pokemon, HEALS[item_name])
+        if healed > 0:
+            return {"success": True, "messages": [f"{pokemon.get('name','Votre Pokémon')} récupère {healed} PV !"]}
+        return {"success": False, "messages": ["Cela n'a eu aucun effet…"]}
 
-def use_item_on_pokemon(item_name, target):
-    """
-    Utilise un objet pendant un combat sur un Pokémon.
+    if item_name in CURES:
+        ok = cure_status(pokemon, CURES[item_name])
+        if ok:
+            return {"success": True, "messages": [f"Le statut de {pokemon.get('name','Votre Pokémon')} est guéri !"]}
+        return {"success": False, "messages": ["Cela n'a eu aucun effet…"]}
 
-    Args:
-        item_name (str): Nom de l’objet.
-        target (dict): Données du Pokémon cible.
-
-    Returns:
-        dict: {success: bool, messages: list[str]} décrivant le résultat.
-    """
-    item = get_item_data(item_name)
-    if not item:
-        return {
-            "success": False,
-            "messages": [f"L’objet {item_name} est inconnu."]
-        }
-
-    if not can_use_item_in_battle(item_name):
-        return {
-            "success": False,
-            "messages": [f"Impossible d’utiliser {item_name} pendant un combat."]
-        }
-
-    # --- Poké Balls ---
-    if item.get("category") == "standard-balls":
-        return attempt_capture(target, item_name, target.get("status"))
-
-    # --- Soins de PV ---
-    if "healing" in item:
-        current_hp = target["stats"]["hp"]
-        max_hp = target["stats"].get("max_hp", current_hp)
-
-        if current_hp <= 0:
-            return {
-                "success": False,
-                "messages": [f"{target['name']} est KO. Impossible d’utiliser {item_name}."]
-            }
-        if current_hp == max_hp:
-            return {
-                "success": False,
-                "messages": [f"{target['name']} a déjà tous ses PV."]
-            }
-
-        heal_amount = item["healing"]
-        healed = min(heal_amount, max_hp - current_hp)
-        target["stats"]["hp"] += healed
-
-        return {
-            "success": True,
-            "messages": [f"{item_name} a restauré {healed} PV à {target['name']}."]
-        }
-
-    # --- Soins de statut ---
-    if "status_heal" in item:
-        current_status = target.get("status")
-        if not current_status:
-            return {
-                "success": False,
-                "messages": [f"{target['name']} n’a aucun problème de statut."]
-            }
-
-        status_heal = item["status_heal"]
-        if status_heal == "all" or current_status in status_heal:
-            target["status"] = None
-            return {
-                "success": True,
-                "messages": [f"{target['name']} n’est plus {current_status} !"]
-            }
-
-        return {
-            "success": False,
-            "messages": [f"{item_name} ne peut pas soigner ce statut."]
-        }
-
-    # --- Aucun effet applicable ---
-    return {
-        "success": False,
-        "messages": [f"{item_name} n’a aucun effet en combat."]
-    }
+    return {"success": False, "messages": ["Objet inconnu ou non utilisable ici."]}

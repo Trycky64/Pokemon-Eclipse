@@ -1,117 +1,118 @@
 # data/pokemon_loader.py
+# -*- coding: utf-8 -*-
 
 """
-Fournit des fonctions pour charger les données des Pokémon à partir de pokemon.json.
-Permet l'accès par ID, nom, ou autre champ utile (types, stats, sprites, etc.).
+Accès aux données des Pokémon (pokemon.json) + utilitaires :
+- get_all_pokemon, get_pokemon_by_id, get_pokemon_by_name
+- get_learnable_moves(pokemon_id, level) : 4 dernières attaques apprises (<= level)
 """
 
 import json
 import os
+from functools import lru_cache
+from typing import Dict, List, Optional
+
 from data.moves_loader import get_move_by_name
 
 POKEMON_PATH = os.path.join("data", "pokemon.json")
 
 
-def load_pokemon_data() -> list:
+@lru_cache(maxsize=1)
+def load_pokemon_data() -> List[Dict]:
     """Charge tout le fichier pokemon.json en mémoire."""
-    with open(POKEMON_PATH, encoding="utf-8") as f:
+    with open(POKEMON_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
-def get_pokemon_by_id(pokemon_id: int) -> dict:
-    """Retourne un Pokémon à partir de son ID numérique."""
-    return next((p for p in load_pokemon_data() if p["id"] == pokemon_id), {})
+def get_all_pokemon() -> List[Dict]:
+    """Retourne la liste complète des Pokémon (tel que dans le JSON)."""
+    return list(load_pokemon_data())
 
 
-def get_pokemon_by_name(name: str) -> dict:
-    """Retourne un Pokémon à partir de son nom (insensible à la casse)."""
-    return next((p for p in load_pokemon_data() if p["name"].lower() == name.lower()), {})
+def get_pokemon_by_id(pokemon_id: int) -> Dict:
+    """Retourne un Pokémon à partir de son ID numérique (ou {} si introuvable)."""
+    for p in load_pokemon_data():
+        if int(p.get("id", -1)) == int(pokemon_id):
+            return p
+    return {}
 
 
-def get_pokemon_stats(pokemon_id: int) -> dict:
-    """Retourne les statistiques d'un Pokémon par son ID."""
-    return get_pokemon_by_id(pokemon_id).get("stats", {})
+def get_pokemon_by_name(name: str) -> Dict:
+    """Retourne un Pokémon à partir de son nom (FR) insensible à la casse."""
+    target = (name or "").strip().lower()
+    for p in load_pokemon_data():
+        if (p.get("name", "") or "").lower() == target:
+            return p
+    return {}
 
 
-def get_pokemon_types(pokemon_id: int) -> list:
-    """Retourne la liste des types d'un Pokémon par son ID."""
-    return get_pokemon_by_id(pokemon_id).get("types", [])
+def get_pokemon_stats(pokemon_id: int) -> Dict:
+    """Retourne le dict 'stats' d'un Pokémon."""
+    p = get_pokemon_by_id(pokemon_id)
+    return p.get("stats", {}) if p else {}
 
 
-def get_pokemon_moves(pokemon_id: int) -> list:
-    """Retourne la liste des attaques connues d'un Pokémon."""
-    return get_pokemon_by_id(pokemon_id).get("moves", [])
-
-
-def get_pokemon_sprite(pokemon_id: int, form: str = "front") -> str:
+def _last_unique_moves_learned(learnset: List[Dict], level: int) -> List[str]:
     """
-    Retourne le chemin du sprite d'un Pokémon.
-    Args:
-        form (str): 'front', 'back', 'front_shiny', etc.
-
-    Returns:
-        str: chemin du sprite ou chaîne vide.
+    À partir d'une liste [{"name": str, "level": int}, ...] renvoie les 4
+    dernières attaques uniques apprises à un niveau <= level (ordre du plus récent au plus ancien).
     """
-    return get_pokemon_by_id(pokemon_id).get("sprites", {}).get(form, "")
+    last_by_name = {}
+    for entry in learnset or []:
+        name = entry.get("name")
+        lvl = int(entry.get("level", 1))
+        if not name:
+            continue
+        if lvl <= level:
+            # On conserve la dernière occurrence (plus haut niveau)
+            last_by_name[name] = max(lvl, last_by_name.get(name, 1))
+    # Trier par niveau (desc) pour obtenir les plus récents d'abord
+    sorted_names = sorted(last_by_name.items(), key=lambda kv: kv[1], reverse=True)
+    return [name for name, _ in sorted_names[:4]]
 
 
-def get_pokemon_base_experience(pokemon_id: int) -> int:
-    """Retourne l'expérience de base gagnée en battant ce Pokémon."""
-    return get_pokemon_by_id(pokemon_id).get("base_experience", 0)
-
-
-def get_pokemon_evolution_chain(pokemon_id: int) -> dict:
-    """Retourne l'arbre d'évolution à partir du Pokémon donné."""
-    return get_pokemon_by_id(pokemon_id).get("evolution", {})
-
-
-def get_all_pokemon() -> list:
-    """Retourne la liste complète des Pokémon du fichier JSON."""
-    return load_pokemon_data()
-
-
-def get_learnable_moves(pokemon_id: int, level: int = 5) -> list:
+def get_learnable_moves(pokemon_id: int, level: int) -> List[Dict]:
     """
-    Retourne une liste des mouvements que le Pokémon peut apprendre jusqu'à un certain niveau.
-
-    Args:
-        pokemon_id (int): ID du Pokémon.
-        level (int): Niveau maximum des attaques à inclure.
-
-    Returns:
-        list: Liste de 4 attaques maximum sous forme de dict.
+    Construit la liste (max 4) des attaques apprises par montée de niveau (<= level).
+    Renvoie des dicts complets (nom FR, type, power, accuracy, pp, etc.).
     """
-    pokemon = get_pokemon_by_id(pokemon_id)
-    if not pokemon:
+    p = get_pokemon_by_id(pokemon_id)
+    if not p:
         return []
 
-    moves = []
-    seen_moves = set()
+    picked_names = _last_unique_moves_learned(p.get("moves", []), int(level or 1))
 
-    learnset = sorted(pokemon.get("moves", []), key=lambda x: x["level"])
+    moves: List[Dict] = []
+    seen = set()
+    for move_name in picked_names:
+        if move_name in seen:
+            continue
+        move_data = get_move_by_name(move_name, language="fr")
+        if not move_data:
+            # Log non-bloquant, utile en debug
+            print(f"[⚠] Attaque introuvable : {move_name} (pokemon_id={pokemon_id})")
+            continue
 
-    for entry in learnset:
-        move_name = entry["name"]
-        if entry["level"] <= level and move_name not in seen_moves:
-            move_data = get_move_by_name(move_name, language="fr")
-            if move_data:
-                move = {
-                    "name": move_data["name_fr"],
-                    "type": move_data["type"],
-                    "power": move_data.get("power", 0),
-                    "accuracy": move_data.get("accuracy", 100),
-                    "category": move_data.get("damage_class", "unknown"),
-                    "pp": move_data.get("pp", 0),
-                    "max_pp": move_data.get("pp", 0),
-                }
-                moves.append(move)
-                seen_moves.add(move_name)
-            else:
-                print(f"[⚠️] Move introuvable dans moves.json: {move_name} pour Pokémon ID {pokemon_id}")
+        moves.append({
+            "name": move_data.get("name_fr", move_data.get("name", move_name)),
+            "type": move_data.get("type", "normal"),
+            "power": move_data.get("power", 0) or 0,
+            "accuracy": move_data.get("accuracy", 100) or 100,
+            "pp": move_data.get("pp", 0) or 0,
+            "max_pp": move_data.get("pp", 0) or 0,
+            "damage_class": move_data.get("damage_class", "physical"),
+            "effect": move_data.get("effect", "") or "",
+            "effect_chance": move_data.get("effect_chance", None),
+            "ailment": move_data.get("ailment", "none"),
+            "priority": move_data.get("priority", 0) or 0,
+            "target": move_data.get("target", "selected-pokemon"),
+        })
+        seen.add(move_name)
 
-    return moves[:4]
+    return moves
 
 
-def get_pokemon_by_id_name(name: str) -> dict:
-    """Alias pour get_pokemon_by_name (pour compatibilité avec certaines fonctions)."""
+# Alias occasionnellement attendu ailleurs
+def get_pokemon_by_id_name(name: str) -> Dict:
+    """Compatibilité : alias vers get_pokemon_by_name."""
     return get_pokemon_by_name(name)

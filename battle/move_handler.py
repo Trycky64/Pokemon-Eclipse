@@ -1,125 +1,90 @@
 # battle/move_handler.py
+# -*- coding: utf-8 -*-
 
+"""
+Exécution d'une attaque : vérif PP, précision, dégâts, critique, efficacité, effets annexes.
+Retourne un dictionnaire structuré pour l'UI (messages, flags, valeurs).
+"""
+
+from typing import Dict, List
 import random
-from battle.move_effects import apply_move_effect
-from battle.move_utils import (
-    check_accuracy,
-    is_protected,
-    should_fail,
-    process_multi_hit,
-    get_fixed_damage,
-    reset_temp_status,
-)
-from data.moves_loader import get_move_by_name
 
-def use_move(attacker, defender, move):
+from battle.engine import calculate_damage
+from battle.move_utils import has_pp, consume_pp, accuracy_check, is_status_move
+from battle.move_effects import apply_move_effects, derived_stats_from_stages
+
+def execute_move(attacker: Dict, defender: Dict, move: Dict, rng: random.Random = None) -> Dict:
     """
-    Traite l'utilisation d'une capacité, infligeant les dégâts et appliquant les effets secondaires.
-
-    Args:
-        attacker (dict): Le Pokémon attaquant.
-        defender (dict): Le Pokémon défenseur.
-        move (dict): Données de l'attaque (doit contenir au minimum "name").
-
-    Returns:
-        dict: {"damage": int, "messages": list[str], "deferred_damage": Optional[int]}
+    Exécute une attaque 'move' du lanceur 'attacker' sur 'defender'.
+    Modifie in-place certaines valeurs (HP, statuts, stages).
+    Retour:
+      {
+        "used": bool, "hit": bool, "messages": [str],
+        "damage": int, "crit": bool, "eff": float,
+        "defender_hp_before": int, "defender_hp_after": int
+      }
     """
-    messages = []
-    deferred_damage = None
+    if rng is None:
+        rng = random.Random()
 
-    move = get_move_by_name(move["name"], language="fr") or move
-    print(f"[DEBUG] Utilisation de {move.get('name', move.get('name_fr', '???'))}")
-
-    if should_fail(attacker, defender, move):
-        messages.append(f"L'attaque de {attacker['name']} a échoué.")
-        reset_temp_status(attacker)
-        reset_temp_status(defender)
-        return {"damage": 0, "messages": messages, "deferred_damage": None}
-
-    if not check_accuracy(attacker, defender, move):
-        messages.append(f"{attacker['name']} rate son attaque !")
-        reset_temp_status(attacker)
-        reset_temp_status(defender)
-        return {"damage": 0, "messages": messages, "deferred_damage": None}
-
-    if is_protected(defender):
-        messages.append(f"{defender['name']} s'est protégé contre l'attaque !")
-        reset_temp_status(attacker)
-        reset_temp_status(defender)
-        return {"damage": 0, "messages": messages, "deferred_damage": None}
-
-    if move.get("effects", {}).get("one_hit_ko"):
-        defender["hp"] = 0
-        messages.append(f"{attacker['name']} a mis KO {defender['name']} en un seul coup !")
-        reset_temp_status(attacker)
-        reset_temp_status(defender)
-        return {"damage": 9999, "messages": messages, "deferred_damage": 9999}
-
-    damage = 0
-
-    if move.get("power") or move.get("fixed_damage") or move.get("level_damage"):
-        damage_info = calculate_basic_damage(attacker, defender, move)
-
-        if isinstance(damage_info, tuple):
-            damage, extra_messages = damage_info
-            messages.extend(extra_messages)
-        else:
-            damage = damage_info
-
-        damage = max(1, damage)
-        deferred_damage = damage
-        messages.append(f"{attacker['name']} utilise {move['name_fr']} !")
-        messages.append(f"{defender['name']} a subi {damage} dégâts !")
-
-        secondary_effects = apply_move_effect(attacker, defender, move, last_damage=damage)
-        if secondary_effects:
-            messages.extend(secondary_effects)
-
-    else:
-        messages.append(f"{attacker['name']} utilise {move['name_fr']} !")
-
-        secondary_effects = apply_move_effect(attacker, defender, move, last_damage=0)
-
-        if secondary_effects:
-            messages.extend(secondary_effects)
-        else:
-            messages.append("Mais cela n'a eu aucun effet...")
-
-    reset_temp_status(attacker)
-    reset_temp_status(defender)
-
-    return {
-        "damage": damage,
-        "messages": messages,
-        "deferred_damage": deferred_damage
+    result = {
+        "used": False, "hit": False, "messages": [],
+        "damage": 0, "crit": False, "eff": 1.0,
+        "defender_hp_before": int(defender.get("hp", 1)),
+        "defender_hp_after": int(defender.get("hp", 1)),
     }
 
-def calculate_basic_damage(attacker, defender, move):
-    """
-    Calcule les dégâts d'une attaque de base (sans effets secondaires).
+    name = move.get("name") or "Attaque"
+    # PP
+    if not has_pp(move):
+        result["messages"].append(f"{attacker.get('name','Votre Pokémon')} ne peut pas lancer {name} (PP) !")
+        return result
 
-    Args:
-        attacker (dict): Pokémon attaquant.
-        defender (dict): Pokémon défenseur.
-        move (dict): Attaque utilisée.
+    # Consomme le PP maintenant (comme les jeux GBA)
+    consume_pp(move, 1)
+    result["used"] = True
 
-    Returns:
-        int | tuple[int, list[str]]: Dégâts infligés, ou (1, messages) pour attaques multi-coups.
-    """
-    fixed_damage = get_fixed_damage(attacker, defender, move)
-    if fixed_damage is not None:
-        return fixed_damage
+    # Statut/Stat-only ?
+    if is_status_move(move):
+        # Effets non-dégâts
+        msgs = apply_move_effects(attacker, defender, move, rng)
+        result["messages"].append(f"{attacker.get('name','Votre Pokémon')} utilise {name} !")
+        result["messages"].extend(msgs)
+        # Recalcule dérivés si besoin
+        attacker["derived_stats"] = derived_stats_from_stages(attacker)
+        defender["derived_stats"] = derived_stats_from_stages(defender)
+        return result
 
-    if move.get("multi_hit"):
-        multi_hit_info = process_multi_hit(attacker, defender, move)
-        return 1, multi_hit_info["messages"]
+    # Précision
+    if not accuracy_check(attacker, defender, move, rng):
+        result["messages"].append(f"{attacker.get('name','Votre Pokémon')} utilise {name}… mais l'attaque échoue !")
+        return result
 
-    attack_stat = attacker.get("stats", {}).get("atk", 10)
-    defense_stat = defender.get("stats", {}).get("def", 10)
-    level = attacker.get("level", 5)
-    power = move.get("power", 50)
+    # Dégâts
+    calc = calculate_damage(attacker, defender, move, rng)
+    dmg = max(1, int(calc["damage"]))
+    result["hit"] = True
+    result["damage"] = dmg
+    result["crit"] = bool(calc["crit"])
+    result["eff"] = float(calc["eff"])
 
-    base_damage = (((2 * level / 5 + 2) * attack_stat * power) / (defense_stat * 50)) + 2
-    base_damage *= random.uniform(0.85, 1.0)
+    defender["hp"] = max(0, int(defender.get("hp", 1)) - dmg)
 
-    return int(base_damage)
+    # Messages
+    result["messages"].append(f"{attacker.get('name','Votre Pokémon')} utilise {name} !")
+    if calc["crit"]:
+        result["messages"].append("Coup critique !")
+    if calc["eff"] > 1.0:
+        result["messages"].append("C'est super efficace !")
+    elif 0 < calc["eff"] < 1.0:
+        result["messages"].append("Ce n'est pas très efficace…")
+
+    # Effets additionnels
+    result["messages"].extend(apply_move_effects(attacker, defender, move, rng))
+
+    # Statistiques dérivées après effets
+    attacker["derived_stats"] = derived_stats_from_stages(attacker)
+    defender["derived_stats"] = derived_stats_from_stages(defender)
+
+    result["defender_hp_after"] = int(defender["hp"])
+    return result

@@ -1,100 +1,101 @@
-# battle/move_utils.py
+# battle/engine.py
+# -*- coding: utf-8 -*-
 
+"""
+Moteur de calculs de combat : dégâts, critique, STAB, efficacité type, etc.
+Aucune I/O, pur calcul pour être testable.
+"""
+
+from typing import Dict, Tuple
 import random
 
-def check_accuracy(attacker, defender, move):
+# Tableau d'efficacité simplifié (extrait le plus courant)
+# Tu peux l'étendre si besoin. Les types inconnus retombent sur 1.0
+TYPE_CHART = {
+    ("feu", "plante"): 2.0,
+    ("feu", "eau"): 0.5,
+    ("eau", "feu"): 2.0,
+    ("eau", "plante"): 0.5,
+    ("plante", "eau"): 2.0,
+    ("plante", "feu"): 0.5,
+    ("électrik", "eau"): 2.0,
+    ("électrik", "plante"): 0.5,
+    ("sol", "électrik"): 2.0,
+    # etc. (à compléter si tu as la table complète)
+}
+
+def get_types(entity: Dict) -> Tuple[str, str]:
+    """Retourne les types (1 ou 2), en minuscule."""
+    types = entity.get("types", [])
+    a = (types[0] or "").lower() if len(types) >= 1 else ""
+    b = (types[1] or "").lower() if len(types) >= 2 else ""
+    return a, b
+
+def type_multiplier(move_type: str, defender: Dict) -> float:
+    """Produit des multiplicateurs sur 1 ou 2 types."""
+    if not move_type:
+        return 1.0
+    mt = move_type.lower()
+    t1, t2 = get_types(defender)
+    mult = 1.0
+    if t1:
+        mult *= TYPE_CHART.get((mt, t1), 1.0)
+    if t2:
+        mult *= TYPE_CHART.get((mt, t2), 1.0)
+    return mult
+
+def stab_multiplier(move_type: str, attacker: Dict) -> float:
+    """STAB si le lanceur a le même type que l'attaque."""
+    if not move_type:
+        return 1.0
+    mt = move_type.lower()
+    t1, t2 = get_types(attacker)
+    return 1.5 if (mt == t1 or mt == t2) else 1.0
+
+def roll_crit(rng: random.Random) -> Tuple[bool, float]:
+    """Critique simple (1/24 par défaut GBA-like)."""
+    is_crit = rng.random() < (1.0 / 24.0)
+    return is_crit, (2.0 if is_crit else 1.0)
+
+def calculate_damage(attacker: Dict, defender: Dict, move: Dict, rng: random.Random = None) -> Dict:
     """
-    Vérifie si l'attaque réussit selon sa précision.
-
-    Args:
-        attacker (dict): Le Pokémon attaquant.
-        defender (dict): Le Pokémon défenseur.
-        move (dict): Les données du mouvement.
-
-    Returns:
-        bool: True si l'attaque touche, False sinon.
+    Calcule les dégâts d'une attaque physique/spéciale simplifiée.
+    Attendu:
+      attacker["level"], attacker["stats"]["attack"/"sp_attack"]
+      defender["stats"]["defense"/"sp_defense"]
+      move["power"], move["type"], move["damage_class"] ("physical"/"special")
+    Retour:
+      { "damage": int, "crit": bool, "eff": float, "stab": float, "roll": float }
     """
-    accuracy = move.get("accuracy")
-    if accuracy is None:
-        return True  # Certaines attaques (ex : Danse-Lames) ne peuvent pas échouer
-    return random.randint(1, 100) <= accuracy
+    if rng is None:
+        rng = random.Random()
 
-def is_protected(defender):
-    """
-    Vérifie si la cible est sous un effet de protection.
+    power = int(move.get("power", 0) or 0)
+    if power <= 0:
+        return {"damage": 0, "crit": False, "eff": 1.0, "stab": 1.0, "roll": 1.0}
 
-    Args:
-        defender (dict): Le Pokémon défenseur.
+    dmg_cls = (move.get("damage_class") or "physical").lower()
+    level = max(1, int(attacker.get("level", 1)))
+    atk_stat = "attack" if dmg_cls == "physical" else "sp_attack"
+    def_stat = "defense" if dmg_cls == "physical" else "sp_defense"
 
-    Returns:
-        bool: True si protégé par Abri/Détection/etc.
-    """
-    return defender.get("_protected", False)
+    atk = max(1, int(attacker.get("stats", {}).get(atk_stat, 10)))
+    dfc = max(1, int(defender.get("stats", {}).get(def_stat, 10)))
 
-def should_fail(attacker, defender, move, last_move=None):
-    """
-    Détermine si l'attaque doit échouer directement.
+    # Critique
+    is_crit, crit_mult = roll_crit(rng)
 
-    Args:
-        attacker (dict): Le Pokémon attaquant.
-        defender (dict): Le Pokémon défenseur.
-        move (dict): Le mouvement utilisé.
-        last_move (dict, optional): Dernier mouvement utilisé (non utilisé ici).
+    # Variance 0.85..1.00
+    roll = rng.uniform(0.85, 1.0)
 
-    Returns:
-        bool: True si l'attaque échoue immédiatement.
-    """
-    if attacker.get("_recharging"):
-        attacker["_recharging"] = False
-        return True
-    if move.get("requires_charge") and not attacker.get("_charging"):
-        return True
-    if move.get("name") == "Échec":
-        return True
-    return False
+    # STAB + efficacité
+    stab = stab_multiplier(move.get("type", ""), attacker)
+    eff = type_multiplier(move.get("type", ""), defender)
 
-def process_multi_hit(attacker, defender, move_data):
-    """
-    Gère les attaques à coups multiples (ex: Furia, Double-Pied).
+    # Formule simplifiée proche des GBA
+    base = (((2 * level / 5 + 2) * power * atk / dfc) / 50) + 2
+    damage = int(base * stab * eff * crit_mult * roll)
+    if damage < 1 and power > 0:
+        damage = 1
 
-    Args:
-        attacker (dict): Le Pokémon attaquant.
-        defender (dict): Le Pokémon défenseur.
-        move_data (dict): Les données du mouvement.
-
-    Returns:
-        dict: {"hits": int, "messages": list[str]}
-    """
-    hits = random.choices([2, 3, 4, 5], weights=[35, 35, 15, 15])[0]
-    messages = [f"Le coup {i + 1} touche !" for i in range(hits)]
-    messages.append(f"{move_data['name']} a frappé {hits} fois !")
-
-    return {"hits": hits, "messages": messages}
-
-def get_fixed_damage(attacker, defender, move):
-    """
-    Retourne les dégâts fixes pour certaines attaques spéciales.
-
-    Args:
-        attacker (dict): Le Pokémon attaquant.
-        defender (dict): Le Pokémon défenseur.
-        move (dict): Les données de l'attaque.
-
-    Returns:
-        int | None: Dégâts fixes ou None si non applicable.
-    """
-    if move.get("fixed_damage") is not None:
-        return move["fixed_damage"]
-    if move.get("level_damage"):
-        return attacker.get("level", 1)
-    return None
-
-def reset_temp_status(pokemon):
-    """
-    Réinitialise les états temporaires d'un Pokémon après son tour.
-
-    Args:
-        pokemon (dict): Données du Pokémon à nettoyer.
-    """
-    pokemon.pop("_protected", None)
-    pokemon.pop("_flinched", None)
+    return {"damage": damage, "crit": is_crit, "eff": eff, "stab": stab, "roll": roll}

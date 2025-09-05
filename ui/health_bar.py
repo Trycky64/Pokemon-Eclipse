@@ -1,93 +1,92 @@
 # ui/health_bar.py
+# -*- coding: utf-8 -*-
 
 import pygame
 
+
 class HealthBar:
     """
-    Barre de points de vie avec animation fluide et code couleur.
+    Barre de points de vie avec animation fluide et code couleur façon GBA.
+    API :
+      - set_max_hp(max_hp)
+      - set_show_text(enabled, font_path=None, font_size=None, offset=None) [optionnel]
+      - update(current_hp, dt_ms)
+      - draw(surface)
     """
 
     def __init__(self, pos, size, max_hp, colors=None):
-        """
-        Initialise la barre de PV.
-
-        Args:
-            pos (tuple): Coordonnées (x, y) de la barre.
-            size (tuple): Taille (largeur, hauteur) de la barre.
-            max_hp (int): PV maximum.
-            colors (dict, optional): Couleurs selon la proportion de PV restante.
-        """
         self.x, self.y = pos
         self.width, self.height = size
-        self.max_hp = max_hp
+        self.max_hp = max(1, int(max_hp))
 
-        self.current_hp = max_hp
-        self.displayed_hp = max_hp
+        self.current_hp = float(self.max_hp)
+        self.displayed_hp = float(self.max_hp)
 
-        self.start_hp = max_hp
-        self.target_hp = max_hp
-        self.animating = False
-        self.animation_elapsed = 0
-        self.animation_duration = 0.7  # en secondes
+        # Animation
+        self._speed = 0.02  # proportion par ms
+        self._snap = 0.5
 
         self.colors = colors or {
-            "high": (0, 192, 0),       # > 50%
-            "medium": (232, 192, 0),   # entre 20% et 50%
-            "low": (240, 64, 48)       # < 20%
+            "high": (88, 200, 96),     # > 50%
+            "mid":  (248, 192, 0),     # 25%..50%
+            "low":  (232, 64, 48),     # <= 25%
+            "bg":   (32, 32, 32),
         }
 
-    def update(self, current_hp, dt):
-        """
-        Met à jour la barre en animant la transition de PV.
+        # Texte optionnel (utile pour allié)
+        self.show_text = False
+        self._font_path = "assets/fonts/power clear bold.ttf"
+        self._font_size = 23
+        self._text_offset = (11, 10)  # dx, dy depuis (x, y+height)
 
-        Args:
-            current_hp (int): Valeur actuelle réelle de PV.
-            dt (float): Temps écoulé depuis la dernière frame (en secondes).
-        """
-        current_hp = max(0, min(current_hp, self.max_hp))
-        self.current_hp = current_hp
+    def set_max_hp(self, max_hp: int):
+        self.max_hp = max(1, int(max_hp))
+        self.displayed_hp = max(0.0, min(self.displayed_hp, float(self.max_hp)))
+        self.current_hp = max(0.0, min(self.current_hp, float(self.max_hp)))
 
-        if current_hp != self.target_hp:
-            self.start_hp = self.displayed_hp
-            self.target_hp = current_hp
-            self.animation_elapsed = 0
-            self.animating = True
+    def set_show_text(self, enabled: bool, font_path=None, font_size=None, offset=None):
+        self.show_text = bool(enabled)
+        if font_path:
+            self._font_path = font_path
+        if font_size:
+            self._font_size = font_size
+        if offset:
+            self._text_offset = offset
 
-        if self.animating:
-            self.animation_elapsed += dt
-            t = min(self.animation_elapsed / self.animation_duration, 1.0)
-            self.displayed_hp = self.start_hp + (self.target_hp - self.start_hp) * t
-            if t >= 1.0:
-                self.displayed_hp = self.target_hp
-                self.animating = False
-
-    def draw(self, surface):
-        """
-        Dessine la barre de PV sur la surface cible ainsi que le texte "PV actuels / max" (allié uniquement).
-        """
-        if self.max_hp <= 0:
+    def update(self, current_hp: int, dt_ms: float):
+        self.current_hp = max(0.0, min(float(current_hp), float(self.max_hp)))
+        delta = self.current_hp - self.displayed_hp
+        if abs(delta) <= self._snap:
+            self.displayed_hp = float(self.current_hp)
             return
 
-        # --- Couleur en fonction du ratio de PV ---
-        ratio = self.displayed_hp / self.max_hp
-        if ratio > 0.5:
-            color = self.colors["high"]
-        elif ratio > 0.2:
-            color = self.colors["medium"]
+        step = max(1.0, self._speed * float(dt_ms) * float(self.max_hp))
+        if delta > 0:
+            self.displayed_hp = min(self.displayed_hp + step, self.current_hp)
         else:
-            color = self.colors["low"]
+            self.displayed_hp = max(self.displayed_hp - step, self.current_hp)
 
-        # --- Dessin de la barre de PV ---
-        fill_width = int(self.width * ratio)
-        fill_rect = pygame.Rect(self.x, self.y, fill_width, self.height)
-        pygame.draw.rect(surface, color, fill_rect)
+    def draw(self, surface: pygame.Surface):
+        # arrière-plan
+        pygame.draw.rect(surface, self.colors["bg"], (self.x, self.y, self.width, self.height))
 
-        # --- Affichage statique du texte pour le Pokémon allié uniquement ---
-        if self.x == 402 and self.y == 232:  # ← coordonnées spécifiques à la barre du joueur
-            font = pygame.font.Font("assets/fonts/power clear bold.ttf", 23)
-            current = int(round(self.displayed_hp))
-            hp_text = f"{current}/{self.max_hp}"
-            text_surface = font.render(hp_text, True, (80, 80, 84))
+        # couleur selon ratio
+        ratio = (self.displayed_hp / float(self.max_hp)) if self.max_hp else 0.0
+        if   ratio <= 0.25: color = self.colors["low"]
+        elif ratio <= 0.5:  color = self.colors["mid"]
+        else:               color = self.colors["high"]
 
-            # Coordonnées fixes sous la barre alliée
-            surface.blit(text_surface, (413, 242))
+        # remplissage
+        ratio = 0.0 if ratio < 0.0 else (1.0 if ratio > 1.0 else ratio)
+        fill_w = int(self.width * ratio)
+        if fill_w > 0:
+            pygame.draw.rect(surface, color, (self.x, self.y, fill_w, self.height))
+
+        # texte optionnel (ex: "61/61") — **sans coordonnées magiques**
+        if self.show_text:
+            font = pygame.font.Font(self._font_path, self._font_size)
+            cur = int(round(self.displayed_hp))
+            txt = f"{cur}/{int(self.max_hp)}"
+            text_surface = font.render(txt, True, (80, 80, 84))
+            dx, dy = self._text_offset
+            surface.blit(text_surface, (self.x + dx, self.y + self.height + dy))

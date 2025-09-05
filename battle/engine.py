@@ -1,85 +1,101 @@
 # battle/engine.py
+# -*- coding: utf-8 -*-
 
+"""
+Moteur de calculs de combat : dégâts, critique, STAB, efficacité type, etc.
+Aucune I/O, pur calcul pour être testable.
+"""
+
+from typing import Dict, Tuple
 import random
-from data.types_loader import get_all_types
 
-# Chargement du tableau de types
-TYPE_CHART = get_all_types()
+# Tableau d'efficacité simplifié (extrait le plus courant)
+# Tu peux l'étendre si besoin. Les types inconnus retombent sur 1.0
+TYPE_CHART = {
+    ("feu", "plante"): 2.0,
+    ("feu", "eau"): 0.5,
+    ("eau", "feu"): 2.0,
+    ("eau", "plante"): 0.5,
+    ("plante", "eau"): 2.0,
+    ("plante", "feu"): 0.5,
+    ("électrik", "eau"): 2.0,
+    ("électrik", "plante"): 0.5,
+    ("sol", "électrik"): 2.0,
+    # etc. (à compléter si tu as la table complète)
+}
 
-def find_type_info(type_name):
+def get_types(entity: Dict) -> Tuple[str, str]:
+    """Retourne les types (1 ou 2), en minuscule."""
+    types = entity.get("types", [])
+    a = (types[0] or "").lower() if len(types) >= 1 else ""
+    b = (types[1] or "").lower() if len(types) >= 2 else ""
+    return a, b
+
+def type_multiplier(move_type: str, defender: Dict) -> float:
+    """Produit des multiplicateurs sur 1 ou 2 types."""
+    if not move_type:
+        return 1.0
+    mt = move_type.lower()
+    t1, t2 = get_types(defender)
+    mult = 1.0
+    if t1:
+        mult *= TYPE_CHART.get((mt, t1), 1.0)
+    if t2:
+        mult *= TYPE_CHART.get((mt, t2), 1.0)
+    return mult
+
+def stab_multiplier(move_type: str, attacker: Dict) -> float:
+    """STAB si le lanceur a le même type que l'attaque."""
+    if not move_type:
+        return 1.0
+    mt = move_type.lower()
+    t1, t2 = get_types(attacker)
+    return 1.5 if (mt == t1 or mt == t2) else 1.0
+
+def roll_crit(rng: random.Random) -> Tuple[bool, float]:
+    """Critique simple (1/24 par défaut GBA-like)."""
+    is_crit = rng.random() < (1.0 / 24.0)
+    return is_crit, (2.0 if is_crit else 1.0)
+
+def calculate_damage(attacker: Dict, defender: Dict, move: Dict, rng: random.Random = None) -> Dict:
     """
-    Recherche les relations de type pour un type donné.
-
-    Args:
-        type_name (str): Le nom du type (ex. "Feu").
-
-    Returns:
-        dict | None: Les données du type ou None si introuvable.
+    Calcule les dégâts d'une attaque physique/spéciale simplifiée.
+    Attendu:
+      attacker["level"], attacker["stats"]["attack"/"sp_attack"]
+      defender["stats"]["defense"/"sp_defense"]
+      move["power"], move["type"], move["damage_class"] ("physical"/"special")
+    Retour:
+      { "damage": int, "crit": bool, "eff": float, "stab": float, "roll": float }
     """
-    for type_info in TYPE_CHART:
-        if type_info["name"].lower() == type_name.lower():
-            return type_info
-    return None
+    if rng is None:
+        rng = random.Random()
 
-def get_type_multiplier(move_type, defender_types):
-    """
-    Calcule le multiplicateur de dégâts selon les types du défenseur.
+    power = int(move.get("power", 0) or 0)
+    if power <= 0:
+        return {"damage": 0, "crit": False, "eff": 1.0, "stab": 1.0, "roll": 1.0}
 
-    Args:
-        move_type (str): Le type de l'attaque.
-        defender_types (list[str]): Les types du Pokémon adverse.
+    dmg_cls = (move.get("damage_class") or "physical").lower()
+    level = max(1, int(attacker.get("level", 1)))
+    atk_stat = "attack" if dmg_cls == "physical" else "sp_attack"
+    def_stat = "defense" if dmg_cls == "physical" else "sp_defense"
 
-    Returns:
-        float: Multiplicateur total (0.0 à 4.0+).
-    """
-    multiplier = 1.0
-    move_info = find_type_info(move_type)
-    if not move_info:
-        return multiplier
+    atk = max(1, int(attacker.get("stats", {}).get(atk_stat, 10)))
+    dfc = max(1, int(defender.get("stats", {}).get(def_stat, 10)))
 
-    relations = move_info.get("damage_relations", {})
+    # Critique
+    is_crit, crit_mult = roll_crit(rng)
 
-    for target_type in defender_types:
-        if target_type in relations.get("double_damage_to", []):
-            multiplier *= 2.0
-        elif target_type in relations.get("half_damage_to", []):
-            multiplier *= 0.5
-        elif target_type in relations.get("no_damage_to", []):
-            multiplier *= 0.0
+    # Variance 0.85..1.00
+    roll = rng.uniform(0.85, 1.0)
 
-    return multiplier
+    # STAB + efficacité
+    stab = stab_multiplier(move.get("type", ""), attacker)
+    eff = type_multiplier(move.get("type", ""), defender)
 
-def calculate_damage(attacker, defender, move):
-    """
-    Calcule les dégâts infligés par une attaque.
+    # Formule simplifiée proche des GBA
+    base = (((2 * level / 5 + 2) * power * atk / dfc) / 50) + 2
+    damage = int(base * stab * eff * crit_mult * roll)
+    if damage < 1 and power > 0:
+        damage = 1
 
-    Args:
-        attacker (dict): Le Pokémon attaquant.
-        defender (dict): Le Pokémon défenseur.
-        move (dict): Les données de l'attaque.
-
-    Returns:
-        tuple: (dégâts: int, critique: bool, type_multiplier: float)
-    """
-    atk_level = attacker.get("level", 5)
-    move_power = move.get("power")
-    if move_power is None or move_power == 0:
-        return 0, False, 1.0
-
-    is_special = move.get("damage_class") == "special"
-
-    atk_stat = attacker["stats"].get("special-attack" if is_special else "attack", 10)
-    def_stat = defender["stats"].get("special-defense" if is_special else "defense", 10)
-
-    base = (((2 * atk_level / 5 + 2) * move_power * atk_stat / def_stat) / 50) + 2
-
-    move_type = move.get("type")
-    stab = 1.5 if move_type in attacker.get("types", []) else 1.0
-    type_multiplier = get_type_multiplier(move_type, defender.get("types", []))
-
-    is_crit = random.random() < 0.0625  # 6.25% chance
-    crit_multiplier = 1.5 if is_crit else 1.0
-    random_factor = random.uniform(0.85, 1.0)
-
-    damage = int(base * stab * type_multiplier * crit_multiplier * random_factor)
-    return max(1, damage), is_crit, type_multiplier
+    return {"damage": damage, "crit": is_crit, "eff": eff, "stab": stab, "roll": roll}
