@@ -21,7 +21,10 @@ POKEMON_PATH = os.path.join("data", "pokemon.json")
 def load_pokemon_data() -> List[Dict]:
     """Charge tout le fichier pokemon.json en mémoire."""
     with open(POKEMON_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+        data = json.load(f)
+    if not isinstance(data, list):
+        raise ValueError("pokemon.json doit contenir une liste")
+    return data
 
 
 def get_all_pokemon() -> List[Dict]:
@@ -64,9 +67,9 @@ def _last_unique_moves_learned(learnset: List[Dict], level: int) -> List[str]:
         if not name:
             continue
         if lvl <= level:
-            # On conserve la dernière occurrence (plus haut niveau)
+            # On conserve la dernière occurrence (plus haut niveau) si doublon
             last_by_name[name] = max(lvl, last_by_name.get(name, 1))
-    # Trier par niveau (desc) pour obtenir les plus récents d'abord
+    # Trie par niveau (desc) pour obtenir les plus récents d'abord
     sorted_names = sorted(last_by_name.items(), key=lambda kv: kv[1], reverse=True)
     return [name for name, _ in sorted_names[:4]]
 
@@ -89,7 +92,7 @@ def get_learnable_moves(pokemon_id: int, level: int) -> List[Dict]:
             continue
         move_data = get_move_by_name(move_name, language="fr")
         if not move_data:
-            # Log non-bloquant, utile en debug
+            # Log non-bloquant pour debug
             print(f"[⚠] Attaque introuvable : {move_name} (pokemon_id={pokemon_id})")
             continue
 
@@ -112,7 +115,7 @@ def get_learnable_moves(pokemon_id: int, level: int) -> List[Dict]:
     return moves
 
 
-# Alias occasionnellement attendu ailleurs
+# Alias de compat éventuel
 def get_pokemon_by_id_name(name: str) -> Dict:
     """Compatibilité : alias vers get_pokemon_by_name."""
     return get_pokemon_by_name(name)

@@ -1,107 +1,157 @@
 # data/items_loader.py
+# -*- coding: utf-8 -*-
 
 """
-Chargeur d'objets depuis le fichier items.json.
-Contient des fonctions utilitaires pour accéder aux propriétés des objets.
+Charge les objets (items.json) et fournit des utilitaires de lookup.
+Contrat :
+- Les objets sont stockés dans data/items.json (UTF-8).
+- On privilégie l'UI française : les retours incluent toujours un champ 'name' (FR).
+- On reste permissif : si certaines clés manquent, on renvoie des valeurs par défaut.
+
+Exemples d'objets attendus dans items.json (extrait) :
+[
+  {
+    "id": 1,
+    "name_en": "Potion",
+    "name_fr": "Potion",
+    "category": "medicine",
+    "effect": "heal",
+    "amount": 20,
+    "description": "Rend 20 PV."
+  },
+  {
+    "id": 2,
+    "name_en": "Antidote",
+    "name_fr": "Antidote",
+    "category": "medicine",
+    "effect": "cure",
+    "status": "poison",
+    "description": "Soigne l'empoisonnement."
+  },
+  {
+    "id": 101,
+    "name_en": "Poké Ball",
+    "name_fr": "Poké Ball",
+    "category": "ball",
+    "effect": "capture",
+    "description": "Une simple Poké Ball."
+  }
+]
 """
 
 import json
 import os
 from functools import lru_cache
+from typing import Dict, List, Optional
 
 ITEMS_PATH = os.path.join("data", "items.json")
 
-@lru_cache
-def load_items():
-    """Charge tous les objets depuis le fichier JSON (avec mise en cache)."""
-    with open(ITEMS_PATH, encoding="utf-8") as f:
-        return json.load(f)
 
-def get_item_data(item_name: str) -> dict:
+# ------------------------------- Loading ---------------------------------
+
+@lru_cache(maxsize=1)
+def load_items_data() -> List[Dict]:
+    """Charge et met en cache tous les objets depuis items.json."""
+    with open(ITEMS_PATH, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, list):
+        raise ValueError("items.json doit contenir une liste d'objets")
+    return data
+
+
+def _normalize_item_record(item: Dict, language: str = "fr") -> Dict:
     """
-    Retourne toutes les données d'un objet donné.
-
-    Args:
-        item_name (str): Nom de l'objet.
-
-    Returns:
-        dict: Données de l'objet, ou {} si non trouvé.
+    Retourne une copie normalisée avec champ 'name' cohérent avec l'UI.
+    - language: 'fr' par défaut, sinon 'en'
+    - Garantit la présence minimale des clés de base.
     """
-    items = load_items()
-    return next((item for item in items if item["name"].lower() == item_name.lower()), {})
+    m = dict(item or {})
+    name_key = "name_fr" if language == "fr" else "name_en"
+    m["name"] = m.get(name_key) or m.get("name_fr") or m.get("name_en") or ""
+    m.setdefault("category", "misc")
+    m.setdefault("effect", "")
+    m.setdefault("description", "")
+    # Quantité par défaut pour affichage/inventaire (peut être ignorée par l'UI)
+    m.setdefault("amount", item.get("amount") if isinstance(item.get("amount"), int) else None)
+    m.setdefault("status", item.get("status") if isinstance(item.get("status"), str) else None)
+    return m
 
-# Alias pour compatibilité
-get_item_by_name = get_item_data
 
-def get_item_effect(item_name: str) -> str:
+# ------------------------------ Queries ----------------------------------
+
+def get_all_items(language: str = "fr") -> List[Dict]:
+    """Liste complète d'objets normalisés (champ 'name' conforme UI)."""
+    return [_normalize_item_record(it, language=language) for it in load_items_data()]
+
+
+def get_item_by_name(name: str, language: str = "fr") -> Optional[Dict]:
     """
-    Retourne l'effet texte d'un objet.
-
-    Args:
-        item_name (str): Nom de l'objet.
-
-    Returns:
-        str: Effet texte ou chaîne vide.
+    Récupère un objet par son nom FR/EN (insensible à la casse).
+    Retourne l'item normalisé (avec 'name') ou None.
     """
-    return get_item_data(item_name).get("effect", "")
+    if not name:
+        return None
+    key = "name_fr" if language == "fr" else "name_en"
+    target = name.strip().lower()
 
-def get_item_cost(item_name: str) -> int:
-    """
-    Retourne le coût d'achat d'un objet.
+    # Lookup direct
+    for it in load_items_data():
+        if (it.get(key, "") or "").lower() == target:
+            return _normalize_item_record(it, language=language)
 
-    Args:
-        item_name (str): Nom de l'objet.
+    # Fallback (si mauvais language fourni)
+    other = "name_en" if key == "name_fr" else "name_fr"
+    for it in load_items_data():
+        if (it.get(other, "") or "").lower() == target:
+            return _normalize_item_record(it, language=language)
+    return None
 
-    Returns:
-        int: Prix en Pokédollars.
-    """
-    return get_item_data(item_name).get("cost", 0)
 
-def get_item_sprite(item_name: str) -> str:
-    """
-    Retourne le chemin du sprite d’un objet.
-
-    Args:
-        item_name (str): Nom de l'objet.
-
-    Returns:
-        str: Chemin du sprite ou chaîne vide.
-    """
-    sprite = get_item_data(item_name).get("sprite")
-    return os.path.join("assets", "sprites", "items", sprite) if sprite else ""
-
-def get_item_category(item_name: str) -> str:
-    """
-    Retourne la catégorie de l'objet (ex: healing, balls...).
-
-    Args:
-        item_name (str): Nom de l'objet.
-
-    Returns:
-        str: Nom de la catégorie.
-    """
-    return get_item_data(item_name).get("category", "")
-
-def get_all_items() -> dict:
-    """
-    Retourne tous les objets sous forme de dictionnaire {nom: données}.
-
-    Returns:
-        dict[str, dict]: Tous les objets par nom.
-    """
-    return {item["name"]: item for item in load_items()}
-
-def list_available_items() -> list:
-    """
-    Retourne la liste des objets valides pour les récompenses de combat :
-    - Doivent avoir un sprite
-    - Ne doivent pas être des Master Balls
-
-    Returns:
-        list[str]: Noms des objets valides.
-    """
-    items = get_all_items()
+def get_items_by_category(category: str, language: str = "fr") -> List[Dict]:
+    """Retourne tous les objets d'une catégorie (ex: 'medicine', 'ball')."""
+    cat = (category or "").strip().lower()
     return [
-        name for name, item in items.items()
-        if item.get("sprite") and name.lower() != "master ball"
+        _normalize_item_record(it, language=language)
+        for it in load_items_data()
+        if (it.get("category", "") or "").lower() == cat
     ]
+
+
+# -------------------------- Helpers gameplay -----------------------------
+
+# Tables utiles pour aligner avec battle/item_handler.py & capture_handler
+HEAL_AMOUNTS = {
+    "Potion": 20,
+    "Super Potion": 50,
+    "Hyper Potion": 200,
+}
+
+CURE_STATUS = {
+    "Antidote": "poison",
+    "Anti-Brûle": "burn",
+    "Antiparalysie": "paralysis",
+    "Réveil": "sleep",
+    "Antigel": "freeze",
+}
+
+CAPTURE_BALLS = {"Poké Ball", "Super Ball", "Hyper Ball", "Master Ball"}
+
+
+def is_heal_item(item_name: str) -> bool:
+    return item_name in HEAL_AMOUNTS
+
+
+def is_cure_item(item_name: str) -> bool:
+    return item_name in CURE_STATUS
+
+
+def is_capture_ball(item_name: str) -> bool:
+    return item_name in CAPTURE_BALLS
+
+
+def get_heal_amount(item_name: str) -> int:
+    return HEAL_AMOUNTS.get(item_name, 0)
+
+
+def get_cure_status(item_name: str) -> Optional[str]:
+    return CURE_STATUS.get(item_name)

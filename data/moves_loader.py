@@ -51,6 +51,18 @@ def _normalize_move_record(move: Dict, language: str = "fr") -> Dict:
     name_key = "name_fr" if language == "fr" else "name_en"
     # Ajout d'un champ 'name' pour compatibilité (ex: logs, UI, move_handler).
     m["name"] = m.get(name_key, m.get("name_fr") or m.get("name_en") or "")
+    # Défauts robustes
+    m.setdefault("type", "normal")
+    m.setdefault("damage_class", "physical")
+    m.setdefault("power", 0)
+    m.setdefault("accuracy", 100)
+    m.setdefault("pp", 0)
+    m.setdefault("priority", 0)
+    m.setdefault("effect", "")
+    m.setdefault("description", "")
+    m.setdefault("effect_chance", None)
+    m.setdefault("ailment", "none")
+    m.setdefault("target", "selected-pokemon")
     return m
 
 
