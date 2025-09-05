@@ -1,42 +1,29 @@
 # scene/gameover_scene.py
+# -*- coding: utf-8 -*-
 
+from __future__ import annotations
 import pygame
-from core.scene_manager import Scene
-from scene.menu_scene import MenuScene
 
-FONT_PATH = "assets/fonts/power clear.ttf"
-TITLE_COLOR = (255, 0, 0)
+from core.scene_manager import Scene
+from core.config import SCREEN_WIDTH, SCREEN_HEIGHT, DEFAULT_FONT_PATH
+from core.assets import render_text_cached
+from scene.menu_scene import MenuScene
 
 class GameOverScene(Scene):
     """
-    Scène affichée après une défaite totale du joueur.
-    Affiche un écran 'Game Over' pendant quelques secondes
-    puis retourne automatiquement au menu principal.
+    Écran de game over : Entrée/Espace/Z pour retourner au menu.
     """
+    def handle_event(self, event):
+        if event.type == pygame.KEYDOWN and event.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_z):
+            if self.manager:
+                self.manager.change_scene(MenuScene())
 
-    def __init__(self):
-        super().__init__()
-        self.font_title = pygame.font.Font(FONT_PATH, 48)
-        self.timer = 0
-        self.duration = 3000  # Durée en millisecondes (3 secondes)
+    def update(self, dt_ms: float):
+        pass
 
-    def on_enter(self):
-        """Réinitialise le minuteur à l'entrée dans la scène."""
-        self.timer = 0
-
-    def update(self, dt):
-        """
-        Met à jour le minuteur et change de scène après expiration.
-        """
-        self.timer += dt
-        if self.timer >= self.duration:
-            self.manager.change_scene(MenuScene())
-
-    def draw(self, screen):
-        """
-        Affiche le message 'Game Over' au centre de l'écran.
-        """
-        screen.fill((0, 0, 0))  # Fond noir
-        title_surface = self.font_title.render("Game Over", True, TITLE_COLOR)
-        title_rect = title_surface.get_rect(center=(256, 180))
-        screen.blit(title_surface, title_rect)
+    def draw(self, screen: pygame.Surface):
+        screen.fill((20, 20, 28))
+        t1 = render_text_cached("GAME OVER", DEFAULT_FONT_PATH, 28, (240, 240, 240))
+        t2 = render_text_cached("Appuyez sur Entrée", DEFAULT_FONT_PATH, 18, (240, 240, 240))
+        screen.blit(t1, (SCREEN_WIDTH // 2 - t1.get_width() // 2, SCREEN_HEIGHT // 2 - 36))
+        screen.blit(t2, (SCREEN_WIDTH // 2 - t2.get_width() // 2, SCREEN_HEIGHT // 2 + 12))

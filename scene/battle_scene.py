@@ -172,7 +172,8 @@ class BattleScene(Scene):
         # Message d’ouverture
         self.push(TextAction(f"Un {self.enemy['name']} sauvage apparaît !"))
 
-    def on_exit(self): ...
+    def on_exit(self):
+        pass
 
     # ----------------------------------------------------------------------------------
     # File d’actions

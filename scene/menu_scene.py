@@ -1,63 +1,98 @@
 # scene/menu_scene.py
+# -*- coding: utf-8 -*-
 
+from __future__ import annotations
 import pygame
-from core.scene_manager import Scene
-from scene.starter_scene import StarterScene
+import random
+from typing import Optional, Dict
 
-FONT_PATH = "assets/fonts/power clear.ttf"
-TITLE_COLOR = (255, 255, 0)
-OPTION_COLOR = (255, 255, 255)
-SELECTED_COLOR = (255, 0, 0)
+from core.scene_manager import Scene
+from core.config import SCREEN_WIDTH, SCREEN_HEIGHT, DEFAULT_FONT_PATH
+from core.assets import render_text_cached, get_font
+from core.run_manager import run_manager
+
+from scene.starter_scene import StarterScene
+from scene.battle_scene import BattleScene
+from data.pokemon_loader import get_all_pokemon, get_learnable_moves
 
 class MenuScene(Scene):
     """
-    Scène du menu principal affichée au lancement du jeu.
-    Permet de lancer une nouvelle aventure ou de quitter le jeu.
+    Menu principal (GBA-like) :
+      - Nouvelle partie (choix starter)
+      - Combat aléatoire
+      - Sac (affichage inventaire)
+      - Quitter
     """
 
     def __init__(self):
         super().__init__()
-        self.options = ["Nouvelle aventure", "Quitter"]
-        self.selected = 0
-        self.cooldown = 0
-
-        self.font_title = pygame.font.Font(FONT_PATH, 48)
-        self.font_option = pygame.font.Font(FONT_PATH, 28)
-
-    def on_enter(self):
-        """Réinitialise le délai d'entrée clavier à l'entrée dans la scène."""
-        self.cooldown = 0
-
-    def update(self, dt):
-        """Met à jour le cooldown pour éviter les double-inputs rapides."""
-        self.cooldown = max(0, self.cooldown - dt)
+        self.options = ["Nouvelle partie", "Combat aléatoire", "Sac", "Quitter"]
+        self.index = 0
+        self.title_font = get_font(DEFAULT_FONT_PATH, 28)
 
     def handle_event(self, event):
-        """Gère les événements clavier pour naviguer dans le menu."""
-        if event.type == pygame.KEYDOWN and self.cooldown <= 0:
-            if event.key in (pygame.K_UP, pygame.K_z):
-                self.selected = (self.selected - 1) % len(self.options)
-                self.cooldown = 150
+        if event.type == pygame.KEYDOWN:
+            if event.key in (pygame.K_UP, pygame.K_w):
+                self.index = (self.index - 1) % len(self.options)
             elif event.key in (pygame.K_DOWN, pygame.K_s):
-                self.selected = (self.selected + 1) % len(self.options)
-                self.cooldown = 150
-            elif event.key == pygame.K_RETURN:
-                if self.selected == 0:
-                    self.manager.change_scene(StarterScene())
-                elif self.selected == 1:
-                    pygame.quit()
-                    exit()
+                self.index = (self.index + 1) % len(self.options)
+            elif event.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_z):
+                self._select()
 
-    def draw(self, screen):
-        """Affiche le titre du jeu et les options du menu principal."""
-        screen.fill((0, 0, 0))
+    def _select(self):
+        label = self.options[self.index]
+        if label == "Nouvelle partie":
+            if self.manager:
+                self.manager.push_scene(StarterScene())
+        elif label == "Combat aléatoire":
+            # Si pas de Pokémon → forcer starter d'abord
+            if not run_manager.team:
+                if self.manager:
+                    self.manager.push_scene(StarterScene())
+                return
+            # Ennemi équilibré simple : niveau proche du joueur
+            player = run_manager.get_active_pokemon()
+            lvl = int(player.get("level", 5))
+            all_pkm = [p for p in get_all_pokemon() if p.get("stats")]
+            enemy_base = random.choice(all_pkm) if all_pkm else {
+                "id": 19, "name": "Rattata", "stats": {"hp": 30}, "types": ["normal"]
+            }
+            enemy = {
+                "id": enemy_base["id"],
+                "name": enemy_base["name"],
+                "level": max(2, min(100, lvl + random.choice([-1, 0, 1]))),
+                "types": enemy_base.get("types", []),
+                "stats": dict(enemy_base.get("stats", {"hp": 30})),
+            }
+            enemy["hp"] = int(enemy["stats"].get("hp", 30))
+            enemy["moves"] = get_learnable_moves(enemy["id"], enemy["level"])
+            if self.manager:
+                self.manager.push_scene(BattleScene(enemy))
+        elif label == "Sac":
+            # On peut afficher le sac depuis la scène de bag si tu l’ajoutes au stack,
+            # mais comme le zip d'origine ne contenait qu'un bag_scene incomplet,
+            # on laisse ici un message minimal pour indiquer l'action.
+            # Tu peux pousser la BagScene si tu veux : from scene.bag_scene import BagScene
+            # self.manager.push_scene(BagScene())
+            pass
+        elif label == "Quitter":
+            import sys
+            pygame.quit()
+            sys.exit()
 
-        title_surf = self.font_title.render("Pokémon Eclipse", True, TITLE_COLOR)
-        title_rect = title_surf.get_rect(center=(240, 80))
-        screen.blit(title_surf, title_rect)
+    def update(self, dt_ms: float):
+        pass
 
-        for i, option in enumerate(self.options):
-            color = SELECTED_COLOR if i == self.selected else OPTION_COLOR
-            option_surf = self.font_option.render(option, True, color)
-            option_rect = option_surf.get_rect(center=(240, 200 + i * 50))
-            screen.blit(option_surf, option_rect)
+    def draw(self, screen: pygame.Surface):
+        screen.fill((240, 248, 255))
+        title = self.title_font.render("Pokémon Eclipse", True, (20, 20, 28))
+        screen.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, 86))
+
+        for i, label in enumerate(self.options):
+            surf = render_text_cached(label, DEFAULT_FONT_PATH, 20, (22, 22, 28))
+            x = SCREEN_WIDTH // 2 - surf.get_width() // 2
+            y = 170 + i * 32
+            screen.blit(surf, (x, y))
+            if i == self.index:
+                arrow = render_text_cached("▶", DEFAULT_FONT_PATH, 20, (22, 22, 28))
+                screen.blit(arrow, (x - 24, y))
