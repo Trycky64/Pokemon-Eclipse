@@ -1,16 +1,12 @@
 # core/config.py
-
+# -*- coding: utf-8 -*-
 """
-Fichier de configuration globale pour l'application.
-
-Contient les constantes d'affichage et autres réglages généraux.
+Configuration globale de l'application.
 """
-
-# Dimensions de la fenêtre de jeu
 SCREEN_WIDTH = 512
 SCREEN_HEIGHT = 384
-
-# Nombre d'images par seconde
 FPS = 60
 
-# D'autres constantes pourront être ajoutées ici plus tard
+# Police par défaut (adapter si différent dans tes assets)
+DEFAULT_FONT_PATH = "assets/fonts/power clear bold.ttf"
+DEFAULT_FONT_SIZE = 18

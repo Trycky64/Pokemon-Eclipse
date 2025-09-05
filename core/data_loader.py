@@ -1,59 +1,39 @@
 # core/data_loader.py
-
+# -*- coding: utf-8 -*-
 """
-Fonctions utilitaires pour la gestion des fichiers JSON et des chemins.
+Utilitaires d'E/S pour les fichiers JSON et la gestion de chemins.
 """
-
+from __future__ import annotations
 import json
 import os
+from typing import Any
 
-def load_json(path: str) -> dict:
+def load_json(path: str) -> Any:
     """
-    Charge un fichier JSON depuis un chemin donné.
-
-    Args:
-        path (str): Chemin vers le fichier JSON.
-
-    Returns:
-        dict: Contenu du fichier JSON.
-
-    Raises:
-        FileNotFoundError: Si le fichier n'existe pas.
+    Charge un fichier JSON en UTF-8. Retourne l'objet Python (dict/list).
+    Lève une exception claire si le fichier est introuvable ou invalide.
     """
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"JSON file not found: {path}")
-    with open(path, "r", encoding="utf-8") as file:
-        return json.load(file)
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
-def save_json(path: str, data: dict):
+def save_json(path: str, data: Any, indent: int = 2) -> None:
     """
-    Sauvegarde un dictionnaire Python dans un fichier JSON.
-
-    Args:
-        path (str): Chemin de destination du fichier JSON.
-        data (dict): Données à enregistrer.
+    Sauvegarde un objet Python vers un JSON UTF-8 lisible.
+    Crée les dossiers parents si nécessaires.
     """
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    ensure_dir(os.path.dirname(path) or ".")
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+        json.dump(data, f, ensure_ascii=False, indent=indent)
 
-def ensure_dir(path: str):
+def ensure_dir(path: str) -> None:
     """
-    Crée un dossier s'il n'existe pas encore.
-
-    Args:
-        path (str): Chemin du dossier à créer.
+    Crée le dossier s'il n'existe pas (idempotent).
     """
-    os.makedirs(path, exist_ok=True)
+    if path:
+        os.makedirs(path, exist_ok=True)
 
 def file_exists(path: str) -> bool:
     """
-    Vérifie si un fichier existe.
-
-    Args:
-        path (str): Chemin du fichier.
-
-    Returns:
-        bool: True si le fichier existe, False sinon.
+    True si le fichier existe.
     """
     return os.path.exists(path)

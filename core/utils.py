@@ -1,15 +1,13 @@
 # core/utils.py
-
+# -*- coding: utf-8 -*-
 """
-Fonctions utilitaires globales pour le jeu.
+Utilitaires globaux.
 """
-
-import pygame
-import sys
+import pygame, sys
 
 def quit_game():
     """
-    Ferme proprement le jeu en quittant Pygame et le programme.
+    Ferme proprement le jeu.
     """
     pygame.quit()
     sys.exit()
