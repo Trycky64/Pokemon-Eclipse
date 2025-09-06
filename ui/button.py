@@ -1,52 +1,31 @@
+# ui/button.py
+# -*- coding: utf-8 -*-
+
 import pygame
+from core.assets import render_text_cached
+from core.config import DEFAULT_FONT_PATH
 
-class UIButton:
+class Button:
     """
-    Bouton interactif simple avec effet de survol et déclenchement de callback.
+    Bouton texte simple façon GBA.
+    draw(surface, rect, label, selected) -> dessine avec un curseur si sélectionné.
     """
+    def __init__(self, font_size=18):
+        self.font_size = int(font_size)
+        self.bg = (245, 245, 245)
+        self.border = (32, 32, 32)
+        self.text_color = (22, 22, 28)
+        self.cursor = "▶"
 
-    def __init__(self, rect, text, font, callback, base_color=(255, 255, 255), hover_color=(200, 200, 200)):
-        """
-        Initialise le bouton.
+    def draw(self, surface: pygame.Surface, rect: pygame.Rect, label: str, selected: bool = False):
+        pygame.draw.rect(surface, self.bg, rect)
+        pygame.draw.rect(surface, self.border, rect, 2)
 
-        Args:
-            rect (tuple): (x, y, width, height) définissant la position et la taille.
-            text (str): Texte affiché sur le bouton.
-            font (pygame.font.Font): Police utilisée.
-            callback (callable): Fonction appelée lors du clic.
-            base_color (tuple): Couleur normale.
-            hover_color (tuple): Couleur au survol.
-        """
-        self.rect = pygame.Rect(rect)
-        self.text = text
-        self.font = font
-        self.callback = callback
-        self.base_color = base_color
-        self.hover_color = hover_color
-        self.hovered = False
+        txt = render_text_cached(label, DEFAULT_FONT_PATH, self.font_size, self.text_color)
+        tx = rect.centerx - txt.get_width() // 2
+        ty = rect.centery - txt.get_height() // 2
+        surface.blit(txt, (tx, ty))
 
-    def update(self, mouse_pos, mouse_click):
-        """
-        Met à jour l'état de survol et déclenche l’action si cliqué.
-
-        Args:
-            mouse_pos (tuple): Position actuelle de la souris.
-            mouse_click (bool): True si le bouton de souris est cliqué.
-        """
-        self.hovered = self.rect.collidepoint(mouse_pos)
-        if self.hovered and mouse_click:
-            self.callback()
-
-    def draw(self, surface):
-        """
-        Affiche le bouton sur la surface donnée.
-
-        Args:
-            surface (pygame.Surface): Surface cible.
-        """
-        color = self.hover_color if self.hovered else self.base_color
-        pygame.draw.rect(surface, color, self.rect, border_radius=8)
-
-        text_surface = self.font.render(self.text, True, (0, 0, 0))
-        text_rect = text_surface.get_rect(center=self.rect.center)
-        surface.blit(text_surface, text_rect)
+        if selected:
+            arrow = render_text_cached(self.cursor, DEFAULT_FONT_PATH, self.font_size, self.text_color)
+            surface.blit(arrow, (rect.x + 6, rect.centery - arrow.get_height() // 2))

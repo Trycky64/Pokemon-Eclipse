@@ -3,11 +3,11 @@
 
 import pygame
 
-
 class InputManager:
     """
-    Gestion de la répétition clavier façon GBA :
-      - délai initial (maintien) puis répétition rapide.
+    Gestion des entrées clavier avec répétition façon GBA :
+    - Délai initial avant répétition
+    - Puis répétition à intervalle fixe
     """
     def __init__(self, initial_delay_ms=220, repeat_ms=80):
         self.initial = int(initial_delay_ms)

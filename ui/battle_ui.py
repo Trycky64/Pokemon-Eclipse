@@ -1,204 +1,99 @@
 # ui/battle_ui.py
+# -*- coding: utf-8 -*-
 
-import os
 import pygame
-import gif_pygame
-from PIL import Image
+from typing import Dict, List
 
 from ui.health_bar import HealthBar
 from ui.xp_bar import XPBar
-from data.pokemon_loader import get_pokemon_by_id
+from ui.button import Button
+from core.assets import render_text_cached
+from core.config import DEFAULT_FONT_PATH
 
-# === Chemins ===
-ASSETS = os.path.join("assets", "ui", "battle")
-FONTS = os.path.join("assets", "fonts")
-SPRITE_DIR = os.path.join("assets", "sprites", "pokemon")
-
-# === Constantes ===
-BUTTON_WIDTH = 130
-BUTTON_HEIGHT = 46
-CMD_IMG = pygame.image.load(os.path.join(ASSETS, "cursor_command.png"))
-
-# === Chargement différé des images de statut ===
-STATUS_PLAYER = None
-STATUS_ENEMY = None
-_status_loaded = False
-
-def load_status_images():
-    """Charge les images de statut pour les barres de combat (une fois)."""
-    global STATUS_PLAYER, STATUS_ENEMY, _status_loaded
-    if not _status_loaded:
-        STATUS_PLAYER = pygame.image.load(os.path.join(ASSETS, "status_player.png")).convert_alpha()
-        STATUS_ENEMY = pygame.image.load(os.path.join(ASSETS, "status_enemy.png")).convert_alpha()
-        _status_loaded = True
-
-def get_gif_max_size(gif_path):
-    """Retourne les dimensions maximales d’un GIF pour le redimensionner correctement."""
-    try:
-        with Image.open(gif_path) as img:
-            max_width, max_height = 0, 0
-            for frame in range(img.n_frames):
-                img.seek(frame)
-                w, h = img.size
-                max_width = max(max_width, w)
-                max_height = max(max_height, h)
-            return int(max_width * 2), int(max_height * 2)
-    except Exception:
-        return 192, 192
-
-def get_command_button(index):
-    """Retourne les sprites (normal et sélectionné) du bouton de commande."""
-    normal = CMD_IMG.subsurface(pygame.Rect(0, index * BUTTON_HEIGHT, BUTTON_WIDTH, BUTTON_HEIGHT))
-    selected = CMD_IMG.subsurface(pygame.Rect(BUTTON_WIDTH, index * BUTTON_HEIGHT, BUTTON_WIDTH, BUTTON_HEIGHT))
-    return normal, selected
-
-class BattleButton:
-    """Bouton interactif dans le menu de combat."""
-    def __init__(self, index, pos):
-        self.normal, self.selected = get_command_button(index)
-        self.rect = self.normal.get_rect(topleft=pos)
-
-    def draw(self, surface, selected=False):
-        surface.blit(self.selected if selected else self.normal, self.rect.topleft)
-
-class BattleDialogBox:
-    """Boîte de dialogue du combat affichant les textes et choix."""
-    def __init__(self, pos=(0, 288)):
-        self.image = pygame.image.load(os.path.join(ASSETS, "dialogue_box.png")).convert_alpha()
-        self.rect = self.image.get_rect(topleft=pos)
-        self.font = pygame.font.Font(os.path.join(FONTS, "power clear.ttf"), 25)
-        self.text_color = (0, 0, 0)
-        self.margin_x = 22
-        self.margin_y = 25
-        self.line_spacing = 2
-        self.max_width = 216
-
-    def wrap_text(self, text):
-        """Découpe un texte en lignes selon la largeur max autorisée."""
-        words = text.split(" ")
-        lines = []
-        current_line = ""
-        for word in words:
-            test_line = current_line + word + " "
-            if self.font.size(test_line)[0] <= self.max_width:
-                current_line = test_line
-            else:
-                lines.append(current_line.strip())
-                current_line = word + " "
-        if current_line:
-            lines.append(current_line.strip())
-        return lines
-
-    def draw(self, surface, text, offset_x=0, offset_y=0, draw_box=True):
-        """Affiche la boîte et le texte avec position et marges personnalisées."""
-        if draw_box:
-            surface.blit(self.image, self.rect.topleft)
-        lines = self.wrap_text(text)
-        y = self.rect.top + self.margin_y + offset_y
-        for line in lines:
-            txt_surface = self.font.render(line, True, self.text_color)
-            surface.blit(txt_surface, (self.rect.left + self.margin_x + offset_x, y))
-            y += txt_surface.get_height() + self.line_spacing
-
-def load_battle_ui():
-    """Charge le fond, la boîte de dialogue et les boutons de combat."""
-    bg = pygame.image.load(os.path.join(ASSETS, "battle_bg.png")).convert()
-    dialog = BattleDialogBox()
-    buttons = [
-        BattleButton(0, (250, 294)),
-        BattleButton(1, (250, 336)),
-        BattleButton(2, (376, 294)),
-        BattleButton(3, (376, 336))
-    ]
-    return bg, dialog, buttons
-
-def resize_gif(gif_obj, size):
-    """Redimensionne chaque frame d’un GIF."""
-    resized_frames = [
-        (pygame.transform.scale(frame, size), duration)
-        for frame, duration in gif_obj.get_datas()
-    ]
-    return gif_pygame.GIFPygame(resized_frames)
-
-def load_combat_sprites(ally_id, enemy_id):
-    """Charge les bases et sprites animés du combat (allié + ennemi)."""
-    base_ally = pygame.image.load(os.path.join(ASSETS, "base_ally.png")).convert_alpha()
-    base_enemy = pygame.image.load(os.path.join(ASSETS, "base_enemy.png")).convert_alpha()
-
-    ally = get_pokemon_by_id(ally_id)
-    enemy = get_pokemon_by_id(enemy_id)
-
-    ally_path = os.path.join(SPRITE_DIR, ally["sprites"]["back"])
-    enemy_path = os.path.join(SPRITE_DIR, enemy["sprites"]["front"])
-
-    ally_size = get_gif_max_size(ally_path)
-    enemy_size = get_gif_max_size(enemy_path)
-
-    ally_sprite = resize_gif(gif_pygame.load(ally_path), ally_size)
-    enemy_sprite = resize_gif(gif_pygame.load(enemy_path), enemy_size)
-
-    # Calcul des positions
-    base_ally_rect = base_ally.get_rect(topleft=(-128, 240))
-    base_enemy_rect = base_enemy.get_rect(topleft=(255, 115))
-
-    ally_x = base_ally_rect.centerx - (ally_sprite.get_width() // 2)
-    ally_y = base_ally_rect.centery - ally_sprite.get_height() + 30
-
-    enemy_x = base_enemy_rect.centerx - (enemy_sprite.get_width() // 2) - 5
-    enemy_y = base_enemy_rect.centery - enemy_sprite.get_height()
-
-    return (base_ally, base_enemy), (ally_sprite, enemy_sprite), ((ally_x, ally_y), (enemy_x, enemy_y))
-
-def draw_combat_scene(
-    screen,
-    background,
-    bases,
-    sprites,
-    positions,
-    ally_name="",
-    enemy_name="",
-    ally_level=5,
-    enemy_level=5,
-    enemy_gender="?",
-    draw_ally_hp_bar=True
-):
+class BattleUI:
     """
-    Affiche la scène complète de combat avec sprites, bases, noms et niveaux.
+    Orchestration des composants UI du combat :
+      - barres PV/XP
+      - menu Combat/Sac/Pokémon/Fuite
+      - attaques avec PP
     """
-    load_status_images()
-    font_pkm = pygame.font.Font(os.path.join(FONTS, "power clear.ttf"), 27)
-    font_pv = pygame.font.Font(os.path.join(FONTS, "power clear bold.ttf"), 27)
 
-    screen.blit(background, (0, 0))
+    def __init__(self, player: Dict, enemy: Dict):
+        # HP bars
+        self.ally_hp = HealthBar((302, 232), (128, 6),
+                                 max_hp=int(player.get("stats", {}).get("hp", player.get("hp", 1))))
+        self.ally_hp.set_show_text(True)
+        self.enemy_hp = HealthBar((62, 46), (128, 6),
+                                  max_hp=int(enemy.get("stats", {}).get("hp", enemy.get("hp", 1))))
 
-    base_ally, base_enemy = bases
-    ally_sprite, enemy_sprite = sprites
-    ally_pos, enemy_pos = positions
+        # XP bar
+        self.ally_xp = XPBar((302, 252), max_xp=1)
 
-    screen.blit(base_ally, (-128, 240))
-    screen.blit(base_enemy, (255, 115))
+        # Menus
+        self.root_options = ["Combat", "Sac", "Pokémon", "Fuite"]
+        self.menu_index = 0
+        self.submenu_index = 0
+        self.font = pygame.font.Font(DEFAULT_FONT_PATH, 20)
+        self.btn = Button(font_size=20)
 
-    screen.blit(ally_sprite.blit_ready(), ally_pos)
-    if enemy_sprite:
-        screen.blit(enemy_sprite.blit_ready(), enemy_pos)
+    def update_bars(self, player: Dict, enemy: Dict, dt_ms: float):
+        self.ally_hp.set_max_hp(int(player.get("stats", {}).get("hp", player.get("hp", 1))))
+        self.enemy_hp.set_max_hp(int(enemy.get("stats", {}).get("hp", enemy.get("hp", 1))))
+        self.ally_hp.update(int(player.get("hp", 1)), dt_ms)
+        self.enemy_hp.update(int(enemy.get("hp", 1)), dt_ms)
 
-    screen.blit(STATUS_PLAYER, (268, 193))
-    screen.blit(STATUS_ENEMY, (0, 35))
+    def update_xp(self, current: int, needed: int, dt_ms: float):
+        self.ally_xp.set_max_xp(needed)
+        self.ally_xp.update(current, dt_ms)
 
-    # Texte ennemi
-    enemy_name_text = font_pkm.render(enemy_name, True, (0, 0, 0))
-    gender_color = (66, 150, 255) if enemy_gender == "♂" else (255, 105, 180) if enemy_gender == "♀" else (120, 120, 120)
-    enemy_gender_text = font_pv.render(enemy_gender, True, gender_color)
-    enemy_level_text = font_pv.render(f"Nv.{enemy_level}", True, (51, 51, 51))
+    def draw_hud(self, screen: pygame.Surface, player: Dict, enemy: Dict):
+        # Enemy info
+        e_name = render_text_cached(enemy["name"], DEFAULT_FONT_PATH, 18, (22, 22, 28))
+        e_lvl = render_text_cached(f"N.{enemy.get('level', 5)}", DEFAULT_FONT_PATH, 18, (22, 22, 28))
+        screen.blit(e_name, (62, 26))
+        screen.blit(e_lvl, (184, 26))
+        self.enemy_hp.draw(screen)
 
-    screen.blit(enemy_name_text, (10, 45))
-    screen.blit(enemy_gender_text, (120, 45))
-    screen.blit(enemy_level_text, (140, 45))
+        # Player info
+        a_name = render_text_cached(player["name"], DEFAULT_FONT_PATH, 18, (22, 22, 28))
+        a_lvl = render_text_cached(f"N.{player.get('level', 5)}", DEFAULT_FONT_PATH, 18, (22, 22, 28))
+        screen.blit(a_name, (302, 212))
+        screen.blit(a_lvl, (424, 212))
+        self.ally_hp.draw(screen)
+        self.ally_xp.draw(screen)
 
-    # Texte allié
-    ally_name_text = font_pkm.render(ally_name, True, (0, 0, 0))
-    ally_level_text = font_pv.render(f"Nv.{ally_level}", True, (51, 51, 51))
+    def draw_root_menu(self, screen: pygame.Surface):
+        positions = [
+            pygame.Rect(316, screen.get_height() - 80, 100, 24),
+            pygame.Rect(420, screen.get_height() - 80, 100, 24),
+            pygame.Rect(316, screen.get_height() - 52, 100, 24),
+            pygame.Rect(420, screen.get_height() - 52, 100, 24),
+        ]
+        for i, (label, rect) in enumerate(zip(self.root_options, positions)):
+            self.btn.draw(screen, rect, label, selected=(i == self.menu_index))
 
-    screen.blit(ally_name_text, (305, 205))
-    screen.blit(ally_level_text, (430, 205))
-
+    def draw_moves_menu(self, screen: pygame.Surface, moves: List[Dict]):
+        if not moves:
+            txt = render_text_cached("Aucune attaque.", DEFAULT_FONT_PATH, 18, (22, 22, 28))
+            screen.blit(txt, (24, screen.get_height() - 78))
+            return
+        grid = [
+            (24, screen.get_height() - 84),
+            (220, screen.get_height() - 84),
+            (24, screen.get_height() - 56),
+            (220, screen.get_height() - 56),
+        ]
+        for i, mv in enumerate(moves[:4]):
+            name = mv.get("name", "???")
+            pp = f"{mv.get('pp', 0)}/{mv.get('max_pp', mv.get('pp', 0))}"
+            label = f"{name} (PP {pp})"
+            surf = render_text_cached(label, DEFAULT_FONT_PATH, 18, (22, 22, 28))
+            x, y = grid[i]
+            screen.blit(surf, (x, y))
+            if i == self.submenu_index:
+                arrow = render_text_cached("▶", DEFAULT_FONT_PATH, 18, (22, 22, 28))
+                screen.blit(arrow, (x - 18, y))
+        # Type de l’attaque sélectionnée
+        sel = moves[self.submenu_index]
+        type_label = render_text_cached(f"Type: {sel.get('type','?')}", DEFAULT_FONT_PATH, 18, (22, 22, 28))
+        screen.blit(type_label, (316, screen.get_height() - 84))
